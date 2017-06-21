@@ -4,79 +4,72 @@ import sys
 import psi4
 import scipy.linalg
 
+# Use configparser library to read geometry, basis set from 'Config.ini'
 config = configparser.ConfigParser()
-config.read('Options.ini')
-#print('!'+config['DEFAULT']['basis']+'!')
-
-molecule = psi4.geometry('\n0 1\nO\nH 1 R\nH 1 R 2 A\nR = 1.0\nA = 104.5')
+config.read('Config.ini')
+psi4.core.be_quiet()
+molecule = psi4.geometry(config['DEFAULT']['molecule'])
 molecule.update_geometry()
+basis = psi4.core.BasisSet.build(molecule, "BASIS", config['DEFAULT']['basis'] ,puream=0)
+if config['DEFAULT']['nalpha'] != config['DEFAULT']['nbeta'] :
+    raise ValueError('Expected equal alpha and beta electrons')
 
-basis = psi4.core.BasisSet.build(molecule, "BASIS", "STO-3G",puream=0)
+# Get Molecular Integrals from PSi4 (Overlap, Kinetic, Potential, and Two-Electron)
 mints = psi4.core.MintsHelper(basis)
-
-#Here the to array function is converting psi4 arrays to np arrays
-
-# Overlap integrals
 S = mints.ao_overlap().to_array()
-#Kinetic energy portion
 T = mints.ao_kinetic().to_array()
-# Potential energy portion
 V = mints.ao_potential().to_array()
-#Two-electron repulsion
 I = mints.ao_eri().to_array()
 
 Enuc   = molecule.nuclear_repulsion_energy()
+#print(Enuc)
 natom  = molecule.natom()
-charge = molecule.molecular_charge() # 0 if neutral, -1 if anion, +1 if cation, etc.
+charge = molecule.molecular_charge()
 norb   = mints.basisset().nbf() # number of (spatial) orbitals = number of basis functions
-
 nuclear_charges = [molecule.Z(A) for A in range(natom)] # nuclear charges by atom
 
-#print('S (overlap) shape '+ str(S.shape))
-#print('T (kinetic) shape '+ str(T.shape))
-#print('V (potential) shape '+ str(V.shape))
-#print('I (two elec rep) shape '+ str(I.shape))
-#print("Enuc   = {:<.7f}".format(Enuc))
-#print("natom  = {:d}".format(natom))
-#print("charge = {:d}".format(charge))
-#print("norb   = {:d}".format(norb))
-#print("\nnuclear_charges = {:s}".format(str(nuclear_charges)))
-
-
-#Don't Change
+# Iterate until energy converges
 X = scipy.linalg.fractional_matrix_power(S,-0.5)
 H = T + V
-
-#Do Change
 D = np.zeros((norb,norb))
-
 Prev_Energy = 10.0e18
 Current_Energy = 10.0e9
-eps = 10e-3
+eps = 10e-5
+U = np.zeros((norb,norb))
 
-while abs(Prev_Energy - Current_Energy > eps) :
-#    print('|%d - %f| < %f' % (Prev_Energy, Current_Energy, eps))
-
-    U = np.zeros((norb,norb))
-    for u in range(norb):
-        for v in range(norb):
-            sum = 0.0
-            for p in range(norb):
-                for s in range(norb):
-                    sum += I[u,v,p,s]*D[p,s]
-            U[u,v] = sum
+while abs(Prev_Energy - Current_Energy) > eps :
+#    print('|%f - %f| > %f' % (Prev_Energy, Current_Energy, eps))
+#    for u in range(norb):
+#        for v in range(norb):
+#            sum = 0.0
+#            for p in range(norb):
+#                for s in range(norb):
+#                    sum += (I[u,p,v,s]-0.5*I[u,p,s,v])*D[s,p]
+#            U[u,v] = sum
+    U = np.einsum('uvps, sp -> uv', I, D) - 0.5*np.einsum('upvs, sp -> uv', I, D)
+    print(U)
+    
     F = H + U
-    F_orth = X*F*X
-
-    energies, C_orth = np.linalg.eig(F_orth)
-    C = X*C_orth
-
-    for u in range(norb):
-        for v in range(norb):
-            D[u,v] = 2*np.sum(C[u]*C[v])
-
-
     Prev_Energy = Current_Energy
-    Current_Energy = np.sum(np.multiply(H+0.5*U, np.transpose(D)))
-    print(Current_Energy)
+    #    Current_Energy = np.sum((H+0.5*U) * np.transpose(D))
+    E = H + 0.5*U
+    Current_Energy = np.einsum('uv, vu ->',E,D)
+    F_orth =(X.dot(F)).dot(X)
+    energies, C_orth = np.linalg.eigh(F_orth)
+    C = X.dot(C_orth)
+    C = C[:,:5]
+    D = 2*C.dot(C.T)
+#    print(D.shape)
+#    D = np.zeros((norb,norb))
+#    for u in range(norb):
+#        for v in range(norb):
+#            for i in range(5):
+#                D[u,v] += (2*C[u,i]*C[v,i])
+#            D[u,v] = 2*np.sum(C[u]*C[v])
+#    D = 2*np.einsum('ui,vi->vu',C,C)
+#    U = np.einsum('upvs, sp -> uv', I, D) - 0.5*np.einsum('upsv, sp -> uv', I, D)
+
+
+
+    print(Current_Energy + Enuc)
 
