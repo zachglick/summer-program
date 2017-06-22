@@ -3,73 +3,79 @@ import configparser
 import sys
 import psi4
 import scipy.linalg
+import math
 
-# Use configparser library to read geometry, basis set from 'Config.ini'
+# Use configparser module to read geometry from 'Config.ini'
 config = configparser.ConfigParser()
 config.read('Config.ini')
 psi4.core.be_quiet()
 molecule = psi4.geometry(config['DEFAULT']['molecule'])
 molecule.update_geometry()
-basis = psi4.core.BasisSet.build(molecule, "BASIS", config['DEFAULT']['basis'] ,puream=0)
-if config['DEFAULT']['nalpha'] != config['DEFAULT']['nbeta'] :
-    raise ValueError('Expected equal alpha and beta electrons')
+
+# Optional specifications: basis set, maximum number of iterations, and convergence criteria
+basis_name = config['DEFAULT']['basis'] if config.has_option('DEFAULT','basis') else 'STO-3G'
+basis = psi4.core.BasisSet.build(molecule, 'BASIS', basis_name ,puream=0)
+max_iter = int(config['SCF']['max_iter']) if config.has_option('SCF','max_iter') else math.inf
+energy_conv = float(config['SCF']['energy_conv']) if config.has_option('SCF','energy_conv') else 10e-11
+
+# RHF requires fully occupied orbitals (multiplicity of 1)
+if molecule.multiplicity() != 1 :
+    raise ValueError('Multiplicity of 1 required for Restricted Hartree-Fock')
 
 # Get Molecular Integrals from PSi4 (Overlap, Kinetic, Potential, and Two-Electron)
 mints = psi4.core.MintsHelper(basis)
 S = mints.ao_overlap().to_array()
 T = mints.ao_kinetic().to_array()
 V = mints.ao_potential().to_array()
-I = mints.ao_eri().to_array()
+I = mints.ao_eri().to_array() # Note: array is in chemist's notation (?)
 
-Enuc   = molecule.nuclear_repulsion_energy()
-#print(Enuc)
+nuclear_energy   = molecule.nuclear_repulsion_energy() # Constant (function of geometry)
 natom  = molecule.natom()
-charge = molecule.molecular_charge()
+net_charge = molecule.molecular_charge()
 norb   = mints.basisset().nbf() # number of (spatial) orbitals = number of basis functions
-nuclear_charges = [molecule.Z(A) for A in range(natom)] # nuclear charges by atom
+nuclear_charges = [int(molecule.Z(A)) for A in range(natom)] # nuclear charges by atom
+nocc   = int((sum(nuclear_charges) - net_charge)/2) # the number of occupied (non-virtual) orbitals
 
-# Iterate until energy converges
-X = scipy.linalg.fractional_matrix_power(S,-0.5)
-H = T + V
-D = np.zeros((norb,norb))
-Prev_Energy = 10.0e18
-Current_Energy = 10.0e9
-eps = 10e-5
-U = np.zeros((norb,norb))
+X = scipy.linalg.fractional_matrix_power(S,-0.5)    # Orthagonalization matrix
+D = np.zeros((norb,norb))                           # Density matrix (initial guess 0)
+H = T + V                                           # One electron matrix
+U = np.zeros((norb,norb))                           # Two Electron matrix
+F = U + H                                           # Fock Matrix = U + H
 
-while abs(Prev_Energy - Current_Energy) > eps :
-#    print('|%f - %f| > %f' % (Prev_Energy, Current_Energy, eps))
-#    for u in range(norb):
-#        for v in range(norb):
-#            sum = 0.0
-#            for p in range(norb):
-#                for s in range(norb):
-#                    sum += (I[u,p,v,s]-0.5*I[u,p,s,v])*D[s,p]
-#            U[u,v] = sum
-    U = np.einsum('uvps, sp -> uv', I, D) - 0.5*np.einsum('upvs, sp -> uv', I, D)
-    print(U)
-    
+prev_energy = math.inf
+current_energy = 10.0e9
+iteration_num = 0
+
+# Iterate until energy converges or maximum number of iterations reached
+while (abs(prev_energy - current_energy) > energy_conv) and (iteration_num < max_iter) :
+    # Calculating U with the two electron integrals and density matrix
+    for u in range(norb):
+        for v in range(norb):
+            sum = 0.0
+            for p in range(norb):
+                for s in range(norb):
+                    sum += (I[u,v,p,s]-0.5*I[u,p,v,s])*D[s,p] # This works but indices may be swapped
+            U[u,v] = sum
+    # Alternatively: U = np.einsum('uvps, sp -> uv', I, D) - 0.5*np.einsum('upsv, sp -> uv', I, D)
+
+    # Updating the energy
+    prev_energy = current_energy
+    current_energy = np.sum((H+0.5*U) * D.T) # Alternatively: = np.einsum('uv, vu ->',H + ).5*U,D)
+
+    # Updating the fock matrix to get the basis coeffiecients (C) which gives the densities (D)
     F = H + U
-    Prev_Energy = Current_Energy
-    #    Current_Energy = np.sum((H+0.5*U) * np.transpose(D))
-    E = H + 0.5*U
-    Current_Energy = np.einsum('uv, vu ->',E,D)
-    F_orth =(X.dot(F)).dot(X)
+    F_orth = X.dot(F).dot(X)
     energies, C_orth = np.linalg.eigh(F_orth)
     C = X.dot(C_orth)
-    C = C[:,:5]
+    C = C[:,:nocc] # Only use coefficients of occupied MOs to compute density matrix
     D = 2*C.dot(C.T)
-#    print(D.shape)
-#    D = np.zeros((norb,norb))
-#    for u in range(norb):
-#        for v in range(norb):
-#            for i in range(5):
-#                D[u,v] += (2*C[u,i]*C[v,i])
-#            D[u,v] = 2*np.sum(C[u]*C[v])
-#    D = 2*np.einsum('ui,vi->vu',C,C)
-#    U = np.einsum('upvs, sp -> uv', I, D) - 0.5*np.einsum('upsv, sp -> uv', I, D)
+
+    iteration_num += 1
+    print("After %d iteration(s) the energy is %.12f Hartree" % (iteration_num, current_energy+nuclear_energy))
+
+print('Final energy: %.12f Hartrees;' % (current_energy+nuclear_energy))
+    
 
 
 
-    print(Current_Energy + Enuc)
 
