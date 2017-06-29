@@ -12,8 +12,10 @@ from molecule import Molecule
 import hessian_to_freqs
 
 def generate_inputs(mol, template, disp_size = 0.005, directory = 'DISPS') :
-
-    fpath = "%s/initial" % ( directory )
+    """ Generates input.dat files for all geometriy perturbations necessary to numerically estimate the hessian """
+    
+    # Energy of the unperturbed molecule
+    fpath = '%s/initial' % ( directory )
     os.makedirs(fpath, exist_ok=True)
     with open('%s/input.dat' % fpath, 'w') as f:
         f.write(template.format(get_atomstring(mol)))
@@ -25,18 +27,20 @@ def generate_inputs(mol, template, disp_size = 0.005, directory = 'DISPS') :
     single_disps = itertools.product(atom_options, xyz_options, disp_options)
     double_disps = itertools.product(atom_options, xyz_options, atom_options, xyz_options, disp_options)
 
+    # Energies caused by perturbations of 1 dof:
     for i, disp in enumerate(single_disps):
-        fpath = "%s/single_%d" % ( directory, i )
+        fpath = '%s/single_%d' % ( directory, i )
         os.makedirs(fpath, exist_ok=True)
         newmol = mol.copy()
         newmol.geom[disp[0]][disp[1]] += disp[2]
         with open('%s/input.dat' % fpath, 'w') as f:
             f.write(template.format(get_atomstring(newmol)))
 
+    # Energies caused by perturbation of 2 dof:
     for i, disp in enumerate(double_disps):
         if disp[0] > disp[2] or (disp[0] == disp[2] and disp[1] >= disp[3]) :
             continue
-        fpath = "%s/double_%d" % ( directory, i )
+        fpath = '%s/double_%d' % ( directory, i )
         os.makedirs(fpath, exist_ok=True)
         newmol = mol.copy()
         newmol.geom[disp[0]][disp[1]] += disp[4]
@@ -45,12 +49,12 @@ def generate_inputs(mol, template, disp_size = 0.005, directory = 'DISPS') :
             f.write(template.format(get_atomstring(newmol)))
 
 def run_jobs(mol, command = 'psi4', directory = 'DISPS') :
-
+    """ Runs the inputs generated in generate_inputs()"""
     for fpath in glob.glob('*/*/'):
-        subprocess.call(["psi4", "%s/input.dat" % fpath])
+        subprocess.call(['psi4', '%s/input.dat' % fpath])
 
 def build_hessian(mol, energy_prefix, disp_size = 0.005, directory = 'DISPS') :
-    
+    """ Uses the energies calculated in run_jobs() to calculate the hessian """
     N = mol.natom
     atom_options = tuple(range(0, mol.natom))
     xyz_options = (0,1,2)
@@ -58,24 +62,25 @@ def build_hessian(mol, energy_prefix, disp_size = 0.005, directory = 'DISPS') :
     single_disps = itertools.product(atom_options, xyz_options, disp_options)
     double_disps = itertools.product(atom_options, xyz_options, atom_options, xyz_options, disp_options)
     hess = np.zeros((3*N, 3*N))
-    fpath = "%s/initial/input.out" % ( directory )
+    fpath = '%s/initial/input.out' % ( directory )
     init_energy = get_energy(fpath, energy_prefix)
-
+    
+    # Adding energies to relavant elements of the hessian (see formula in instrucitons)
     for i, disp in enumerate(single_disps):
-        fpath = "%s/single_%d/input.out" % ( directory, i )
+        fpath = '%s/single_%d/input.out' % ( directory, i )
         energy = get_energy(fpath, energy_prefix)
         hess_ind = 3*disp[0]+disp[1]
         
         for num in range(3*N):
-            hess[hess_ind, num] -= energy
-            hess[num, hess_ind] -= energy
-
-        hess[hess_ind, hess_ind] += 3*energy
+            if num != hess_ind:
+                hess[hess_ind, num] -= energy
+                hess[num, hess_ind] -= energy
+        hess[hess_ind, hess_ind] += energy
 
     for i, disp in enumerate(double_disps):
         if disp[0] > disp[2] or (disp[0] == disp[2] and disp[1] >= disp[3]) :
             continue
-        fpath = "%s/double_%d/input.out" % ( directory, i )
+        fpath = '%s/double_%d/input.out' % ( directory, i )
         energy = get_energy(fpath, energy_prefix)
         hess_ind1 = 3*disp[0]+disp[1]
         hess_ind2 = 3*disp[2]+disp[3]
@@ -92,12 +97,14 @@ def build_hessian(mol, energy_prefix, disp_size = 0.005, directory = 'DISPS') :
                 hess[row, col] += 2*init_energy
                 hess[row,col] /= (2 * (disp_size ** 2))
 
+    # write hessian to file and return hessian matrix
     with open('numerical_hessian.dat', 'w') as f:
         for i in range(3*N):
-            f.write("\t".join([str(val) for val in hess[i]]) + "\n")
+            f.write('\t'.join(['%.20f' % (val) for val in hess[i]]) + '\n')
     return hess
 
 def get_atomstring(mol):
+    """ Returns a string representation of the molecule object compatible with psi4 """
     mol.to_angstrom()
     formatted_atoms = []
     for atom in mol :
@@ -106,6 +113,7 @@ def get_atomstring(mol):
     return '\n'.join(formatted_atoms)
 
 def get_energy(fpath, energy_prefix):
+    """ Gets the energy from a psi4 output file """
     with open(fpath) as f:
         for line in f:
             if energy_prefix in line:

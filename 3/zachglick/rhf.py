@@ -29,12 +29,12 @@ T = mints.ao_kinetic().to_array()
 V = mints.ao_potential().to_array()
 I = mints.ao_eri().to_array() # Note: array is in chemist's notation (?)
 
-nuclear_energy   = molecule.nuclear_repulsion_energy() # Constant (function of geometry)
-natom  = molecule.natom()
+nuclear_energy = molecule.nuclear_repulsion_energy() # Constant (function of geometry)
+natom = molecule.natom()
 net_charge = molecule.molecular_charge()
-norb   = mints.basisset().nbf() # number of (spatial) orbitals = number of basis functions
+norb = mints.basisset().nbf() # number of (spatial) orbitals = number of basis functions
 nuclear_charges = [int(molecule.Z(A)) for A in range(natom)] # nuclear charges by atom
-nocc   = int((sum(nuclear_charges) - net_charge)/2) # the number of occupied (non-virtual) orbitals
+nocc = int((sum(nuclear_charges) - net_charge)/2) # the number of occupied (non-virtual) orbitals
 
 X = scipy.linalg.fractional_matrix_power(S,-0.5)    # Orthagonalization matrix
 D = np.zeros((norb,norb))                           # Density matrix (initial guess 0)
@@ -54,7 +54,7 @@ while (abs(prev_energy - current_energy) > energy_conv) and (iteration_num < max
             sum = 0.0
             for p in range(norb):
                 for s in range(norb):
-                    sum += (I[u,v,p,s]-0.5*I[u,p,v,s])*D[s,p] # This works but indices may be swapped
+                    sum += (I[u,v,p,s]-0.5*I[u,s,p,v])*D[s,p]
             U[u,v] = sum
     # Alternatively: U = np.einsum('uvps, sp -> uv', I, D) - 0.5*np.einsum('upsv, sp -> uv', I, D)
 
@@ -73,7 +73,7 @@ while (abs(prev_energy - current_energy) > energy_conv) and (iteration_num < max
     iteration_num += 1
     print("After %d iteration(s) the energy is %.12f Hartree" % (iteration_num, current_energy+nuclear_energy))
 
-print('Final energy: %.12f Hartrees;' % (current_energy+nuclear_energy))
+print('Final energy: %.12f Hartrees' % (current_energy+nuclear_energy))
     
 
 
