@@ -1,0 +1,10 @@
+set mp2_type conv
+set basis STO-3G
+molecule H2O {
+  0 1
+  O
+  H 1 1.0
+  H 1 1.0 2 104.5
+}
+
+energy('mp2')
