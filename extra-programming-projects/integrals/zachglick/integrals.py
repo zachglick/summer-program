@@ -52,41 +52,51 @@ class Integrals:
                 }
                 self.sto3g.append(ao_info)
                     
-        self.orbital_pairs = list(itertools.product(range(self.norb),range(self.norb)))     # for easier iteration over orbitals
-        self.gaussian_pairs = list(itertools.product(range(NGAUSS),range(NGAUSS)))          # for easier iteration over gaussians
-  
+        # for cleaner iteration over orbitals and gaussians
+        self.orbital_pairs = list(itertools.product(range(self.norb),range(self.norb)))
+        self.gaussian_pairs = list(itertools.product(range(NGAUSS),range(NGAUSS)))
+        self.orbital_quartets = list(itertools.product(range(self.norb),range(self.norb),range(self.norb),range(self.norb)))
+        self.gaussian_quartets = list(itertools.product(range(NGAUSS),range(NGAUSS),range(NGAUSS),range(NGAUSS)))
+                                     
         self.calc_overlap()
         self.calc_kinetic_energy()
         self.calc_nuclear_attraction()
         self.calc_electron_repulsion()
 
-        
-        print('\nMy Overlap:')
-        for row in self.overlap:
-            print(' '.join(['%.10f'%(num) for num in row]))
-        print('\nPsi4 Overlap:')
-        psi4overlap = np.load('psi4_test/psi4_overlap.npy')
-        for row in psi4overlap:
-            print(' '.join(['%.10f'%(num) for num in row]))
-        print('')
-
-        print('\nMy Kinetic:')
-        for row in self.kinetic:
-            print(' '.join(['%.10f'%(num) for num in row]))
-        print('\nPsi4 Kinetic:')
-        psi4kinetic = np.load('psi4_test/psi4_kinetic.npy')
-        for row in psi4kinetic:
-            print(' '.join(['%.10f'%(num) for num in row]))
-        print('')
-
-        print('\nMy Nuclear:')
-        for row in self.nuclear:
-            print(' '.join(['%.10f'%(num) for num in row]))
-        print('\nPsi4 Nuclear:')
-        psi4nuclear = np.load('psi4_test/psi4_potential.npy')
-        for row in psi4nuclear:
-            print(' '.join(['%.10f'%(num) for num in row]))
-        print('')
+        np.set_printoptions(threshold=np.inf) # suppresses "...", printing all elements
+        np.set_printoptions(precision=5) # reduces number of decimal places per element to 5
+        np.set_printoptions(linewidth=200) # lengthens printable line-width from 75 characters
+        np.set_printoptions(suppress=True) # suppresses hard-to-read exponential notation
+#        
+#        print('\nMy Overlap:')
+#        print(self.overlap)
+#        print('\nPsi4 Overlap:')
+#        psi4overlap = np.load('psi4_test/psi4_overlap.npy')
+#        print(psi4overlap)
+#        print('')
+#
+#        print('\nMy Kinetic:')
+#        print(self.kinetic)
+#        print('\nPsi4 Kinetic:')
+#        psi4kinetic = np.load('psi4_test/psi4_kinetic.npy')
+#        print(psi4kinetic)
+#        print('')
+#
+#        print('\nMy Nuclear:')
+#        print(self.nuclear)
+#        print('\nPsi4 Nuclear:')
+#        psi4nuclear = np.load('psi4_test/psi4_potential.npy')
+#        print(psi4nuclear)
+#        print('')
+#
+#        print('\n~~~~~~~~My Repulsion:~~~~~~~~')
+#        print(self.twoelec)
+#        print('\n~~~~~~~~Psi4 Repulsion:~~~~~~~~')
+#        psi4twoelec = np.load('psi4_test/psi4_twoelec.npy')
+#        print(psi4twoelec)
+#        print('\n~~~~~~~~Difference:~~~~~~~~')
+#        print(self.twoelec - psi4twoelec)
+#        print('')
 
 
     def read_alpha(self, atom_name, subshell):
@@ -111,7 +121,6 @@ class Integrals:
         """ calculates overlap integrals """
         self.overlap = np.zeros((self.norb,self.norb))
         for orbA_i, orbB_i in self.orbital_pairs:
-            temp_ans = 0.0
             for gaussA_i, gaussB_i in self.gaussian_pairs:
                 self.overlap[ orbA_i, orbB_i ] += self.normalized_gaussian_overlap(self.sto3g[ orbA_i ], self.sto3g[ orbB_i ], gaussA_i, gaussB_i)
 
@@ -130,7 +139,7 @@ class Integrals:
         gamma = alphaA + alphaB
         return ( math.exp ( -alphaA
                             * alphaB
-                            * self.AB2(orbA['R'], orbB['R']) * 1.8897161646320724 * 1.8897161646320724
+                            * self.disp_squared(orbA['R'], orbB['R']) * 1.8897161646320724 * 1.8897161646320724
                             / gamma )
                 * self.s_func(orbA, orbB, gaussA_i, gaussB_i, 0)   # Sx
                 * self.s_func(orbA, orbB, gaussA_i, gaussB_i, 1)   # Sy
@@ -169,13 +178,8 @@ class Integrals:
             nuc_coords = atom[1]
             nuc_charge = molecule.charges[ind]
             for orbA_i, orbB_i in self.orbital_pairs:
-#            print('~~~~~~~~~ nuc charge: %i ~~~~~~~~~'% nuc_charge)
-#            for orbA_i, orbB_i in [(0,0),(1,1),(2,2),(3,3),(4,4)]:
-                print('~~~~~~~ p: %i ~~~~~~~'% orbA_i)
                 for gaussA_i, gaussB_i in self.gaussian_pairs:
-                    ans = self.normalized_gaussian_nuclear(self.sto3g[ orbA_i ], self.sto3g[ orbB_i ], gaussA_i, gaussB_i, nuc_coords, nuc_charge)
-                    print('gauss %i and %i are %f' % (gaussA_i,gaussB_i,ans))
-                    self.nuclear[ orbA_i, orbB_i ] += ans
+                    self.nuclear[ orbA_i, orbB_i ] += self.normalized_gaussian_nuclear(self.sto3g[ orbA_i ], self.sto3g[ orbB_i ], gaussA_i, gaussB_i, nuc_coords, nuc_charge)
 
     def normalized_gaussian_nuclear(self, orbA, orbB, gaussA_i, gaussB_i, nuc_coords, nuc_charge):
         """ this func calculates the contribution of these two gaussians to the total kinetic """
@@ -183,7 +187,6 @@ class Integrals:
         alphaB = orbB['a'][gaussB_i]
         gamma = alphaA + alphaB
         
-#        print('!'+str(self.nuclear_summation(orbA, orbB, gaussA_i, gaussB_i, nuc_coords)))
         return ( orbA['d'][gaussA_i]
                 * orbB['d'][gaussB_i]
                 * self.normalization(orbA, gaussA_i)
@@ -192,7 +195,7 @@ class Integrals:
                 * ( 2 * math.pi / gamma )
                 * math.exp ( -alphaA
                              * alphaB
-                             * self.AB2(orbA['R'], orbB['R']) * 1.8897161646320724 * 1.8897161646320724
+                             * self.disp_squared(orbA['R'], orbB['R']) * 1.8897161646320724 * 1.8897161646320724
                              / gamma )
                 * self.nuclear_summation(orbA, orbB, gaussA_i, gaussB_i, nuc_coords))
     
@@ -200,6 +203,41 @@ class Integrals:
     def calc_electron_repulsion(self):
         """ calc electron repulsion """
         self.twoelec = np.zeros((self.norb,self.norb,self.norb,self.norb))
+        for orbA_i, orbB_i, orbC_i, orbD_i in self.orbital_quartets:
+            for gaussA_i, gaussB_i, gaussC_i, gaussD_i in self.gaussian_quartets:
+                orbA, orbB, orbC, orbD = self.sto3g[orbA_i], self.sto3g[orbB_i], self.sto3g[orbC_i], self.sto3g[orbD_i]
+                self.twoelec[ orbA_i, orbB_i , orbC_i, orbD_i] += self.normalized_gaussian_electron(orbA, orbB, orbC, orbD, gaussA_i, gaussB_i, gaussC_i, gaussD_i)
+    
+    def normalized_gaussian_electron(self, orbA, orbB, orbC, orbD, gaussA_i, gaussB_i, gaussC_i, gaussD_i):
+        """ this func calculates the contribution of these two gaussians to the total kinetic """
+        alphaA = orbA['a'][gaussA_i]
+        alphaB = orbB['a'][gaussB_i]
+        alphaC = orbC['a'][gaussC_i]
+        alphaD = orbD['a'][gaussD_i]
+        gammaAB = alphaA + alphaB
+        gammaCD = alphaC + alphaD
+        
+        return ( orbA['d'][gaussA_i]
+                * orbB['d'][gaussB_i]
+                * orbC['d'][gaussC_i]
+                * orbD['d'][gaussD_i]
+                * self.normalization(orbA, gaussA_i)
+                * self.normalization(orbB, gaussB_i)
+                * self.normalization(orbC, gaussC_i)
+                * self.normalization(orbD, gaussD_i)
+                * ( 2 * (math.pi ** 2) / (gammaAB*gammaCD) )
+                *  (( math.pi / (gammaAB+gammaCD) ) ** 0.5 )
+                * math.exp ( -alphaA
+                            * alphaB
+                            * self.disp_squared(orbA['R'], orbB['R']) * 1.8897161646320724 * 1.8897161646320724
+                            / gammaAB )
+                * math.exp ( -alphaC
+                            * alphaD
+                            * self.disp_squared(orbC['R'], orbD['R']) * 1.8897161646320724 * 1.8897161646320724
+                            / gammaCD )
+                * self.twoelec_summation(orbA, orbB, orbC, orbD, gaussA_i, gaussB_i, gaussC_i, gaussD_i))
+    
+    
 
     def normalization(self, orb, gauss_i):
         """ The normalization constant for a gaussian """
@@ -222,16 +260,10 @@ class Integrals:
     def s_func(self, orbA, orbB, gaussA_i, gaussB_i, coord):
         """ no idea what this even is """
         gamma = orbA['a'][gaussA_i] + orbB['a'][gaussB_i]
-        P = self.P( orbA, orbB, gaussA_i, gaussB_i )
-        PA_coord = (P[coord]-orbA['R'][coord] ) * 1.8897161646320724
-        PB_coord = (P[coord]-orbB['R'][coord] ) * 1.8897161646320724
-        
-        if coord == 0:
-            char = 'l'
-        elif coord == 1:
-            char = 'm'
-        elif coord == 2:
-            char = 'n'
+        P = self.com( orbA, orbB, gaussA_i, gaussB_i )
+        PA_coord = ( P[coord] - orbA['R'][coord] ) * 1.8897161646320724
+        PB_coord = ( P[coord] - orbB['R'][coord] ) * 1.8897161646320724
+        char = ANG_COORDS[coord]
 
         j_max_exc = int( (orbA[char] + orbB[char]) / 2 ) + 1
         sum = 0.0
@@ -241,25 +273,23 @@ class Integrals:
                      / ( (2*gamma) ** j) )
         return math.sqrt( math.pi / gamma ) * sum
     
-    
-    def f_func( self, jj, ll, mm, a, b ):
+    def f_func( self, j, l, m, a, b ):
         """ no idea what this even is """
-        sum_min = max(0, jj-mm)
-        sum_max_exc = min(jj, ll) + 1
+        sum_min = max(0, j-m)
+        sum_max_exc = min(j, l) + 1
         ans = 0.0
-        for kk in range(sum_min, sum_max_exc):
-            ans += ( special.binom(mm, jj-kk)
-                     * special.binom(ll, kk)
-                     * ( a ** (ll - kk) )
-                     * ( b ** (mm + kk - jj) ) )
+        for k in range(sum_min, sum_max_exc):
+            ans += ( special.binom(m, j-k)
+                     * special.binom(l, k)
+                     * ( a ** (l - k) )
+                     * ( b ** (m + k - j) ) )
         return ans
 
     def nuclear_summation(self, orbA, orbB, gaussA_i, gaussB_i, nuc_coords):
-        """ sums v_funcs """
-        P = self.P(orbA, orbB, gaussA_i, gaussB_i) # The 'center of mass' between atomic orbitals A and B
+        """ performs all 9 loops required to evaluate a single nuclear term """
+        P = self.com(orbA, orbB, gaussA_i, gaussB_i) # The 'center of mass' between atomic orbitals A and B
         PC2 = ((P[0]-nuc_coords[0])**2 + (P[1]-nuc_coords[1])**2 + (P[2]-nuc_coords[2])**2) * 1.8897161646320724 * 1.8897161646320724
         gamma = orbA['a'][gaussA_i] + orbB['a'][gaussB_i]
-        
         PA = (P - orbA['R'])  * 1.8897161646320724
         PB = (P - orbB['R'])  * 1.8897161646320724
         PC = (P - nuc_coords) * 1.8897161646320724
@@ -276,34 +306,37 @@ class Integrals:
                                    * self.v_func(n, t, k, orbA['n'], orbB['n'], gamma, PA[2], PB[2], PC[2]) )
                 middle_sum += inner_sum * self.v_func(m, s, j, orbA['m'], orbB['m'], gamma, PA[1], PB[1], PC[1])
             outer_sum += middle_sum * self.v_func(l, r, i, orbA['l'], orbB['l'], gamma, PA[0], PB[0], PC[0])
-
         return outer_sum
 
 
+    def twoelec_summation(self, orbA, orbB, orbC, orbD, gaussA_i, gaussB_i, gaussC_i, gaussD_i):
+        """ performs all 1000 loops required to eval the twoelec integrals"""
+        P = self.com(orbA, orbB, gaussA_i, gaussB_i) # The 'center of mass' between atomic orbitals A and B
+        Q = self.com(orbC, orbD, gaussC_i, gaussD_i) # The 'center of mass' between atomic orbitals A and B
+        PQ2 = self.disp_squared(P,Q) * 1.8897161646320724 * 1.8897161646320724
+        gammaAB = orbA['a'][gaussA_i] + orbB['a'][gaussB_i]
+        gammaCD = orbC['a'][gaussC_i] + orbD['a'][gaussD_i]
+        delta = 1/(4*gammaAB) + 1/(4*gammaCD)
+        PA = (P - orbA['R'])  * 1.8897161646320724
+        PB = (P - orbB['R'])  * 1.8897161646320724
+        QC = (Q - orbC['R'])  * 1.8897161646320724
+        QD = (Q - orbD['R'])  * 1.8897161646320724
+        PQ = (P-Q) * 1.8897161646320724
+        
+        outer_sum = 0.0
+        for lAB, rAB, lCD, rCD, i in self.weird_sum_thing_2(orbA, orbB, orbC, orbD, 0):
+#            print((lAB,rAB,lCD,rCD,i))
+            middle_sum = 0.0
+            for mAB, sAB, mCD, sCD, j in self.weird_sum_thing_2(orbA, orbB, orbC, orbD, 1):
+                inner_sum = 0.0
+                for nAB, tAB, nCD, tCD, k in self.weird_sum_thing_2(orbA, orbB, orbC, orbD, 2):
+                    v = lAB + lCD + mAB + mCD + nAB + nCD -2*(rAB + rCD + sAB + sCD + tAB + tCD) - (i + j + k)
+                    inner_sum += ( self.boys_func(v, PQ2 / (4*delta))
+                                  * self.g_func(nAB,nCD,tAB,tCD,k,orbA['n'],orbB['n'],PA[2],PB[2],gammaAB,orbC['n'],orbD['n'],QC[2],QD[2],gammaCD,PQ[2]) )
+                middle_sum += inner_sum * self.g_func(mAB,mCD,sAB,sCD,j,orbA['m'],orbB['m'],PA[1],PB[1],gammaAB,orbC['m'],orbD['m'],QC[1],QD[1],gammaCD,PQ[1])
+            outer_sum += middle_sum * self.g_func(lAB,lCD,rAB,rCD,i,orbA['l'],orbB['l'],PA[0],PB[0],gammaAB,orbC['l'],orbD['l'],QC[0],QD[0],gammaCD,PQ[0])
+        return outer_sum
 
-
-        v_sums = [0.0, 0.0, 0.0]
-        for coord in range(3): # sum over 3 cartesian coordinates (x, y, and z)
-#            print('~~~%i~~~' % (coord))
-            char = ANG_COORDS[coord]  # (x, y, or z) -> (l, m, n)
-            PA = (P[coord] - orbA['R'][coord]) * 1.8897161646320724
-            PB = (P[coord] - orbB['R'][coord]) * 1.8897161646320724
-            PC = (P[coord] - nuc_coords[coord]) * 1.8897161646320724
-            for lmn, rst, ijk in self.weird_sum_thing(orbA, orbB, coord):
-                print((coord,self.v_func(lmn, rst, ijk, orbA[char], orbB[char], gamma, PA, PB, PC)))
-                v_sums[coord] += self.v_func(lmn, rst, ijk, orbA[char], orbB[char], gamma, PA, PB, PC)
-        boys_sum = 0.0
-        for l, r, i in self.weird_sum_thing(orbA, orbB, 0):
-            for m, s, j in self.weird_sum_thing(orbA, orbB, 1):
-                for n, t, k in self.weird_sum_thing(orbA, orbB, 2):
-                    lmn = l + m + n
-                    rst = r + s + t
-                    ijk = i + j + k
-                    boys_sum += self.boys_func(lmn - 2*rst - ijk, gamma * PC2)
-
-        print((v_sums[0],v_sums[1],v_sums[2]))
-        return v_sums[0]*v_sums[1]*v_sums[2]*boys_sum
-    
     def v_func(self, lmn, rst, ijk, ang_A, ang_B, gamma, PA, PB, PC) :
         """ lotsa math """
         eps = 1/(4*gamma)
@@ -326,16 +359,42 @@ class Integrals:
                      * special.gammainc(v + 0.5, x)
                      * special.gamma(v + 0.5) )
 
+    def theta_func(self, lmn, ang_A, ang_B, a, b, rst, gamma):
+        return (self.f_func(lmn, ang_A, ang_B, a, b)
+                * math.factorial(lmn)
+                * (gamma ** (rst-lmn))
+                / math.factorial(rst)
+                / math.factorial(lmn - 2*rst) )
+
+    def g_func( self, lmnAB, lmnCD, rstAB, rstCD, ijk, ang_A, ang_B, PA, PB, gammaAB, ang_C, ang_D, QC, QD, gammaCD, PQ):
+        delta = 1/(4.0*gammaAB) + 1/(4.0*gammaCD)
+        
+#        if lmnAB + lmnCD - 2*(rstAB + rstCD + ijk) < 0:
+#            print ((lmnAB, lmnCD, rstAB, rstCD, ijk))
+        return ( ((-1) ** lmnAB)
+                 * self.theta_func(lmnAB,ang_A,ang_B,PA,PB,rstAB,gammaAB)
+                 * self.theta_func(lmnCD,ang_C,ang_D,QC,QD,rstCD,gammaCD)
+                 * ((-1) ** ijk)
+                 * ((2*delta) ** (2*(rstAB + rstCD)))
+                 * math.factorial(lmnAB + lmnCD - 2*rstAB - 2*rstCD)
+                 * (delta ** ijk)
+                 * (PQ ** (lmnAB + lmnCD - 2*(rstAB + rstCD + ijk)))
+                 / ((4*delta) ** (lmnAB + lmnCD))
+                 / math.factorial(ijk)
+                 / math.factorial(lmnAB + lmnCD - 2*(rstAB + rstCD + ijk)) )
+
     #
     # Vector functions
     #
     
-    def P( self, orbA, orbB , gaussA_i, gaussB_i ):
+    def com( self, orbA, orbB , gaussA_i, gaussB_i ):
+        """ The 'center of mass' between orbitals A and B """
         alphaA = orbA['a'][gaussA_i]
         alphaB = orbB['a'][gaussB_i]
         return (alphaA*orbA['R'] + alphaB*orbB['R'])/(alphaA + alphaB)
 
-    def AB2( self, vec1, vec2 ):
+    def disp_squared( self, vec1, vec2 ):
+        """ The squared displacement separating the two vectors """
         return ( (vec1[0]-vec2[0]) ** 2
                  + (vec1[1]-vec2[1]) ** 2
                  + (vec1[2]-vec2[2]) ** 2 )
@@ -369,6 +428,25 @@ class Integrals:
                 for ijk in range(ijk_max_exc):
                     lmn_rst_ijk.append((lmn,rst,ijk)) # adding a tuple of valid coordinates to the list
         return lmn_rst_ijk
+
+    def weird_sum_thing_2(self, orbA, orbB, orbC, orbD, coord):
+        """ this returns a list of all tuples """
+        ang_char = ANG_COORDS[coord] # [0,1,2] -> ['l','m','n']
+        lmnAB_max_exc = orbA[ang_char] + orbB[ang_char] + 1 # for summing to (lA+lB) or (mA+mB) or (nA+nB)
+        lmnCD_max_exc = orbC[ang_char] + orbD[ang_char] + 1 # for summing to (lC+lD) or (mC+mD) or (nC+nD)
+        lmnAB_rstAB_lmnCD_rstCD_ijk = [] # tuples of (lAB,rAB,lAB,rAB,i) or (mAB,sAB,mAB,sAB,j) or (nAB,tAB,nAB,tAB,k)
+        for lmnAB in range(lmnAB_max_exc):
+            rstAB_max_exc = int(lmnAB/2.0)+1
+            for rstAB in range(rstAB_max_exc):
+                for lmnCD in range(lmnCD_max_exc):
+                    rstCD_max_exc = int(lmnCD/2.0)+1
+                    for rstCD in range(rstCD_max_exc):
+                        ijk_max_exc = int((lmnAB+lmnCD-2*rstAB-2*rstCD)/2.0)+1
+                        for ijk in range(ijk_max_exc):
+#                            print((lmnAB,rstAB,lmnCD,rstCD,ijk,ijk_max_exc))
+                            lmnAB_rstAB_lmnCD_rstCD_ijk.append((lmnAB,rstAB,lmnCD,rstCD,ijk)) # adding a tuple of valid coordinates to the list
+        return lmnAB_rstAB_lmnCD_rstCD_ijk
+
 
 if __name__ == '__main__':
 #    molecule_string = open('../../../extra-files/molecule.xyz','r').read()
